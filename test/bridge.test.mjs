@@ -163,3 +163,97 @@ test("injects elicitation support, auto-accepts, and preserves image blocks", as
   });
   assert.equal(stderr, "");
 });
+
+test("releases the client when idle and relaunches it on demand", async () => {
+  const child = spawn(process.execPath, [bridgePath], {
+    env: {
+      ...process.env,
+      COMPUTER_USE_CLIENT_PATH: fakeUpstreamPath,
+      COMPUTER_USE_BRIDGE_DIRECT_LAUNCH: "1",
+      COMPUTER_USE_BRIDGE_IDLE_TIMEOUT_MS: "300",
+      COMPUTER_USE_BRIDGE_DEBUG: "1",
+    },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+
+  const waitFor = createMessageReader(child.stdout);
+
+  write(child, {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion: "2025-11-25",
+      capabilities: {},
+      clientInfo: {
+        name: "bridge-test",
+        version: "1.0.0",
+      },
+    },
+  });
+
+  const initialized = await waitFor((message) => message.id === 1);
+  assert.equal(initialized.result?.serverInfo?.name, "fake-computer-use");
+
+  write(child, {
+    jsonrpc: "2.0",
+    method: "notifications/initialized",
+  });
+
+  write(child, {
+    jsonrpc: "2.0",
+    id: 2,
+    method: "tools/call",
+    params: {
+      name: "get_app_state",
+      arguments: {
+        app: "Fake App",
+      },
+    },
+  });
+
+  const first = await waitFor((message) => message.id === 2);
+  assert.equal(first.result?.content?.[0]?.text, "auto-approved");
+
+  await new Promise((resolve) => {
+    setTimeout(resolve, 900);
+  });
+  assert.match(stderr, /releasing the Computer Use client/);
+
+  write(child, {
+    jsonrpc: "2.0",
+    id: 3,
+    method: "tools/call",
+    params: {
+      name: "get_app_state",
+      arguments: {
+        app: "Fake App",
+      },
+    },
+  });
+
+  const second = await waitFor((message) => message.id === 3);
+  assert.equal(second.result?.content?.[0]?.text, "auto-approved");
+  assert.deepEqual(second.result?.content?.[1], {
+    type: "image",
+    data: "aGVsbG8=",
+    mimeType: "image/jpeg",
+  });
+  assert.match(stderr, /relaunched the Computer Use client/);
+
+  child.stdin.end();
+  const exit = await new Promise((resolve) => {
+    child.on("close", (code, signal) => resolve({ code, signal }));
+  });
+
+  assert.deepEqual(exit, {
+    code: 0,
+    signal: null,
+  });
+});

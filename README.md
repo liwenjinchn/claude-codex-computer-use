@@ -123,6 +123,14 @@ that capability is present on `initialize` and automatically accepts the
 app-access elicitation, so sessions work unattended. All other JSON-RPC
 messages, including screenshot image blocks, pass through unchanged.
 
+The Computer Use service treats a connected client as an active hold on the
+controlled applications and releases them when the client exits. Codex ends
+its client at the end of a conversation, but Claude Code keeps plugin MCP
+servers alive for the whole session. The bridge therefore terminates the
+client after 60 seconds without traffic and relaunches it on demand,
+transparently replaying the recorded `initialize` handshake, so apps are not
+held between tasks.
+
 ## Configuration
 
 Environment variables:
@@ -132,6 +140,7 @@ Environment variables:
 | `CODEX_HOME` | Override the Codex data directory. Defaults to `~/.codex`. |
 | `COMPUTER_USE_CLIENT_PATH` | Override the full path to `SkyComputerUseClient`. |
 | `COMPUTER_USE_CODEX_LAUNCHER_PATH` | Override the signed Codex executable path. |
+| `COMPUTER_USE_BRIDGE_IDLE_TIMEOUT_MS` | Idle time before the client is released. Defaults to `60000`; `0` keeps the client running for the whole session. |
 | `COMPUTER_USE_BRIDGE_DEBUG=1` | Write bridge diagnostics to stderr. |
 
 The signed launcher is discovered in this order:
@@ -151,7 +160,9 @@ The bridge intentionally:
 - automatically accepts the Computer Use MCP app-access elicitation;
 - launches the signed client with an unrestricted Codex permission profile;
 - passes accessibility text and screenshots back to Claude as MCP tool
-  results.
+  results;
+- releases the client after an idle timeout so applications are not held
+  between tasks, and relaunches it on demand.
 
 Claude Code may send those tool results to the configured model provider as
 part of the conversation. Do not install the plugin unless that behavior is

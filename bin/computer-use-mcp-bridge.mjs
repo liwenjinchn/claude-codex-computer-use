@@ -8,6 +8,8 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const DEBUG = process.env.COMPUTER_USE_BRIDGE_DEBUG === "1";
+const SYNTHETIC_INIT_ID = "computer-use-bridge/reinitialize";
+const DEFAULT_IDLE_TIMEOUT_MS = 60000;
 
 function debug(message) {
   if (DEBUG) {
@@ -63,6 +65,18 @@ async function resolveTrustedLauncherPath() {
       ", ",
     )}`,
   );
+}
+
+function resolveIdleTimeout() {
+  const raw = process.env.COMPUTER_USE_BRIDGE_IDLE_TIMEOUT_MS?.trim();
+  if (!raw) {
+    return DEFAULT_IDLE_TIMEOUT_MS;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return DEFAULT_IDLE_TIMEOUT_MS;
+  }
+  return parsed;
 }
 
 function withElicitationCapability(message) {
@@ -190,64 +204,210 @@ if (!directLaunch) {
   ];
 }
 
-debug(`starting ${launchCommand} ${launchArgs.join(" ")}`);
+const idleTimeoutMs = resolveIdleTimeout();
 
-const upstream = spawn(launchCommand, launchArgs, {
-  env: process.env,
-  stdio: ["pipe", "pipe", "pipe"],
-});
-
+// The Computer Use service treats a connected client as an active hold on the
+// controlled applications and only releases them when the client process
+// exits. Claude Code keeps plugin MCP servers alive for the whole session, so
+// the bridge releases the client after an idle period and relaunches it on
+// demand, replaying the recorded initialize handshake.
+let upstream = null;
+let state = "down"; // down | starting | ready
 let stopping = false;
+let storedInitialize = null;
+let clientInitialized = false;
+let pendingRequests = new Set();
+let handshakeQueue = [];
+let lastActivity = Date.now();
 
-upstream.stderr.pipe(process.stderr);
+function touch() {
+  lastActivity = Date.now();
+}
 
-upstream.on("error", (error) => {
-  process.stderr.write(
-    `Failed to start the Computer Use MCP client: ${error.message}\n`,
+function isRequest(message) {
+  return (
+    isObject(message) &&
+    typeof message.method === "string" &&
+    Object.hasOwn(message, "id")
   );
-  process.exitCode = 1;
-});
+}
 
-upstream.stdin.on("error", (error) => {
-  if (error.code !== "EPIPE") {
-    process.stderr.write(
-      `Computer Use MCP stdin failed: ${error.message}\n`,
-    );
+function failRequest(id, message) {
+  writeJsonLine(process.stdout, {
+    jsonrpc: "2.0",
+    id,
+    error: {
+      code: -32000,
+      message,
+    },
+  });
+}
+
+function failPendingWork(reason) {
+  for (const id of pendingRequests) {
+    failRequest(id, reason);
   }
-});
+  pendingRequests.clear();
 
-process.stdout.on("error", (error) => {
-  if (error.code === "EPIPE") {
-    stopping = true;
-    upstream.kill("SIGTERM");
+  const queued = handshakeQueue;
+  handshakeQueue = [];
+  for (const item of queued) {
+    if (isRequest(item.message)) {
+      failRequest(item.message.id, reason);
+    }
+  }
+}
+
+function forwardToUpstream(line, message) {
+  if (!upstream || upstream.stdin.destroyed || !upstream.stdin.writable) {
+    if (isRequest(message)) {
+      failRequest(
+        message.id,
+        "The Computer Use client is not running. Retry the request.",
+      );
+    }
     return;
   }
-  throw error;
-});
+  upstream.stdin.write(`${line}\n`);
+  if (isRequest(message)) {
+    pendingRequests.add(message.id);
+  }
+  touch();
+}
 
-pumpJsonLines(
-  process.stdin,
-  (line) => {
-    const message = parseJson(line);
-    const rewritten = withElicitationCapability(message);
+function spawnUpstream() {
+  debug(`starting ${launchCommand} ${launchArgs.join(" ")}`);
 
-    if (rewritten !== null) {
-      debug("advertised form elicitation support");
-      writeJsonLine(upstream.stdin, rewritten);
+  const child = spawn(launchCommand, launchArgs, {
+    env: process.env,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  upstream = child;
+
+  let gone = false;
+  const markGone = (code, signal) => {
+    if (gone) {
+      return;
+    }
+    gone = true;
+    if (upstream !== child) {
+      debug(
+        `released client exited (code=${String(code)}, signal=${String(
+          signal,
+        )})`,
+      );
+      return;
+    }
+    upstream = null;
+    state = "down";
+
+    if (stopping) {
+      debug(`upstream closed (code=${String(code)}, signal=${String(signal)})`);
+      if (signal) {
+        process.exitCode = signal === "SIGINT" ? 130 : 1;
+      } else {
+        process.exitCode = code ?? 0;
+      }
+      process.stdout.end();
       return;
     }
 
-    if (!upstream.stdin.destroyed && upstream.stdin.writable) {
-      upstream.stdin.write(`${line}\n`);
-    }
-  },
-  () => {
-    upstream.stdin.end();
-  },
-);
+    debug(
+      `upstream exited unexpectedly (code=${String(code)}, signal=${String(
+        signal,
+      )}); it will be relaunched on demand`,
+    );
+    failPendingWork(
+      "The Computer Use client exited unexpectedly. Retry the request.",
+    );
+  };
 
-pumpJsonLines(upstream.stdout, (line) => {
+  child.stderr.pipe(process.stderr);
+
+  child.on("error", (error) => {
+    process.stderr.write(
+      `Failed to start the Computer Use MCP client: ${error.message}\n`,
+    );
+    markGone(null, null);
+  });
+
+  child.stdin.on("error", (error) => {
+    if (error.code !== "EPIPE") {
+      process.stderr.write(
+        `Computer Use MCP stdin failed: ${error.message}\n`,
+      );
+    }
+  });
+
+  child.on("close", (code, signal) => {
+    markGone(code, signal);
+  });
+
+  pumpJsonLines(child.stdout, (line) => {
+    onUpstreamLine(child, line);
+  });
+
+  touch();
+  return child;
+}
+
+function relaunchUpstream() {
+  spawnUpstream();
+  state = "starting";
+  writeJsonLine(upstream.stdin, {
+    ...storedInitialize,
+    id: SYNTHETIC_INIT_ID,
+  });
+  debug("relaunching the Computer Use client");
+}
+
+function releaseUpstream() {
+  const child = upstream;
+  upstream = null;
+  state = "down";
+  debug("idle timeout reached; releasing the Computer Use client");
+  child.kill("SIGTERM");
+  setTimeout(() => {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL");
+    }
+  }, 3000).unref();
+}
+
+function onUpstreamLine(child, line) {
+  if (upstream !== child) {
+    return;
+  }
+
   const message = parseJson(line);
+
+  if (isObject(message) && message.id === SYNTHETIC_INIT_ID) {
+    if (message.error) {
+      debug(
+        `relaunch initialize failed: ${String(message.error?.message ?? "")}`,
+      );
+      failPendingWork(
+        "The Computer Use client could not be reinitialized. Retry the request.",
+      );
+      releaseUpstream();
+      return;
+    }
+    if (clientInitialized) {
+      writeJsonLine(child.stdin, {
+        jsonrpc: "2.0",
+        method: "notifications/initialized",
+      });
+    }
+    state = "ready";
+    const queued = handshakeQueue;
+    handshakeQueue = [];
+    for (const item of queued) {
+      forwardToUpstream(item.line, item.message);
+    }
+    debug("relaunched the Computer Use client");
+    touch();
+    return;
+  }
 
   if (
     isObject(message) &&
@@ -261,7 +421,7 @@ pumpJsonLines(upstream.stdout, (line) => {
           : "Computer Use request"
       }`,
     );
-    writeJsonLine(upstream.stdin, {
+    writeJsonLine(child.stdin, {
       jsonrpc: "2.0",
       id: message.id,
       result: {
@@ -269,13 +429,130 @@ pumpJsonLines(upstream.stdout, (line) => {
         content: {},
       },
     });
+    touch();
     return;
   }
 
+  if (
+    isObject(message) &&
+    Object.hasOwn(message, "id") &&
+    !Object.hasOwn(message, "method")
+  ) {
+    pendingRequests.delete(message.id);
+  }
+
+  touch();
   if (!process.stdout.destroyed && process.stdout.writable) {
     process.stdout.write(`${line}\n`);
   }
+}
+
+process.stdout.on("error", (error) => {
+  if (error.code === "EPIPE") {
+    stopping = true;
+    if (upstream) {
+      upstream.kill("SIGTERM");
+    } else {
+      process.exit(1);
+    }
+    return;
+  }
+  throw error;
 });
+
+pumpJsonLines(
+  process.stdin,
+  (line) => {
+    const message = parseJson(line);
+    const rewritten = withElicitationCapability(message);
+
+    if (rewritten !== null) {
+      debug("advertised form elicitation support");
+      storedInitialize = rewritten;
+      if (state === "down") {
+        spawnUpstream();
+        state = "ready";
+      }
+      if (state === "starting") {
+        handshakeQueue.push({
+          line: JSON.stringify(rewritten),
+          message: rewritten,
+        });
+        return;
+      }
+      forwardToUpstream(JSON.stringify(rewritten), rewritten);
+      return;
+    }
+
+    if (isRequest(message) && message.method === "ping") {
+      writeJsonLine(process.stdout, {
+        jsonrpc: "2.0",
+        id: message.id,
+        result: {},
+      });
+      return;
+    }
+
+    if (isObject(message) && message.method === "notifications/initialized") {
+      clientInitialized = true;
+    }
+
+    if (state === "ready") {
+      forwardToUpstream(line, message);
+      return;
+    }
+
+    if (state === "starting") {
+      handshakeQueue.push({ line, message });
+      return;
+    }
+
+    if (isRequest(message)) {
+      if (!storedInitialize) {
+        failRequest(
+          message.id,
+          "The MCP session is not initialized.",
+        );
+        return;
+      }
+      handshakeQueue.push({ line, message });
+      relaunchUpstream();
+      return;
+    }
+
+    if (isObject(message) && typeof message.method === "string") {
+      debug(`dropped ${message.method} while the client is released`);
+    }
+  },
+  () => {
+    stopping = true;
+    if (upstream) {
+      upstream.stdin.end();
+    } else {
+      process.exitCode = process.exitCode ?? 0;
+      process.stdout.end();
+    }
+  },
+);
+
+if (idleTimeoutMs > 0) {
+  const checkInterval = Math.max(
+    50,
+    Math.min(1000, Math.floor(idleTimeoutMs / 2)),
+  );
+  setInterval(() => {
+    if (state !== "ready" || stopping || !storedInitialize) {
+      return;
+    }
+    if (pendingRequests.size > 0) {
+      return;
+    }
+    if (Date.now() - lastActivity < idleTimeoutMs) {
+      return;
+    }
+    releaseUpstream();
+  }, checkInterval).unref();
+}
 
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
   process.once(signal, () => {
@@ -284,16 +561,11 @@ for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
     }
     stopping = true;
     debug(`forwarding ${signal}`);
-    upstream.kill(signal);
+    if (upstream) {
+      upstream.kill(signal);
+    } else {
+      process.exitCode = signal === "SIGINT" ? 130 : 1;
+      process.exit();
+    }
   });
 }
-
-upstream.on("close", (code, signal) => {
-  debug(`upstream closed (code=${String(code)}, signal=${String(signal)})`);
-  if (signal) {
-    process.exitCode = signal === "SIGINT" ? 130 : 1;
-  } else {
-    process.exitCode = code ?? 0;
-  }
-  process.stdout.end();
-});
