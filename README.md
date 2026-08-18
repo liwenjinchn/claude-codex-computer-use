@@ -228,6 +228,16 @@ Someone pressed Esc on the Computer Use overlay, which cancels the app
 session for the current turn. The bridge recycles the client automatically,
 so simply ask Claude to continue when you are ready.
 
+### ChatGPT still lists the app under Computer Use
+
+ChatGPT's Computer Use menu can keep showing an app (with a "Stop Using …"
+action) after the bridge has released the client. The service keeps its app
+session record so that a follow-up turn can resume without a new approval,
+and only Codex's own turn-tracking closes it. External clients have no
+supported way to send that signal. The record is bookkeeping: the controlling
+client process is gone and new bridge sessions are unaffected. Clear it with
+the "Stop Using …" action in ChatGPT, or by quitting ChatGPT.
+
 ### `SkyComputerUseClient computer-history` processes linger
 
 These are ChatGPT's own history/recording helpers, spawned by its
