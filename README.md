@@ -228,6 +228,15 @@ Someone pressed Esc on the Computer Use overlay, which cancels the app
 session for the current turn. The bridge recycles the client automatically,
 so simply ask Claude to continue when you are ready.
 
+### `SkyComputerUseClient computer-history` processes linger
+
+These are ChatGPT's own history/recording helpers, spawned by its
+`codex app-server` daemon whenever Computer Use is used and kept around
+afterwards. They are idle, they do not hold control of any application, and
+they are not managed by this bridge. The client the bridge manages runs with
+a plain `mcp` argument and exits on idle release. The helpers exit when
+ChatGPT quits.
+
 ### `errAETimeout: the AppleEvent timed out`
 
 The Computer Use service could not reach the target application in time. The
