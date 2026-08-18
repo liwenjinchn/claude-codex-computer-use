@@ -24,7 +24,6 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
-          registry-url: "https://registry.npmjs.org"
       - run: npm install -g npm@latest
       - run: pnpm install --frozen-lockfile
       - name: Generate GitHub changelog
@@ -32,4 +31,4 @@ jobs:
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - run: npm publish
+      - run: npm publish --loglevel http
