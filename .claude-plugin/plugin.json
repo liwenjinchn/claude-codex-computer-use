@@ -1,7 +1,7 @@
 {
   "name": "claude-codex-computer-use",
   "displayName": "Claude Codex Computer Use",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Control macOS apps from Claude Code through an existing OpenAI Computer Use installation.",
   "author": {
     "name": "Songkeys",
