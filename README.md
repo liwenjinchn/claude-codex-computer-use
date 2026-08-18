@@ -31,14 +31,14 @@ In a Claude Code session:
 
 ```text
 /plugin marketplace add songkeys/claude-codex-computer-use
-/plugin install claude-codex-computer-use@claude-codex-computer-use
+/plugin install claude-codex-computer-use@songkeys
 ```
 
 Or from the shell:
 
 ```sh
 claude plugin marketplace add songkeys/claude-codex-computer-use
-claude plugin install claude-codex-computer-use@claude-codex-computer-use
+claude plugin install claude-codex-computer-use@songkeys
 ```
 
 New sessions load the Computer Use Skill and MCP server automatically.
@@ -218,10 +218,10 @@ together, then retry the smoke test.
 
 ### Plugin changes do not appear
 
-Restart Claude Code or run `/plugin marketplace update
-claude-codex-computer-use` and reinstall. Claude Code runs a cached copy of
-the installed plugin, so editing a checkout does not affect an existing
-installation until the plugin is updated.
+Restart Claude Code or run `/plugin marketplace update songkeys` and
+reinstall. Claude Code runs a cached copy of the installed plugin, so editing
+a checkout does not affect an existing installation until the plugin is
+updated.
 
 ## License and trademarks
 

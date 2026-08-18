@@ -1,6 +1,6 @@
 {
-  "name": "claude-codex-computer-use",
-  "description": "Control macOS apps from Claude Code through an existing OpenAI Computer Use installation.",
+  "name": "songkeys",
+  "description": "Plugins by Songkeys.",
   "owner": {
     "name": "Songkeys",
     "email": "i@song.work",
