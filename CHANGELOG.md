@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.1 - 2026-08-18
+
+- Recycle the Computer Use client when the service reports that the user
+  stopped the app session, so the stop no longer latches across turns.
+- Signal the launcher's whole process group on release so a wedged client
+  cannot survive a recycle.
+- Stop suggesting `Escape` in the Skill: Esc is the Computer Use overlay's
+  global cancel hotkey. Clear UI through accessibility elements instead.
+- Document the stopped-session and `errAETimeout` behaviors.
+
 ## 0.1.0 - 2026-08-18
 
 - Add a Claude Code plugin with a Computer Use Skill and MCP server.

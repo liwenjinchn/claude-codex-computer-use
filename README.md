@@ -131,6 +131,12 @@ client after 60 seconds without traffic and relaunches it on demand,
 transparently replaying the recorded `initialize` handshake, so apps are not
 held between tasks.
 
+The service also scopes a user-initiated stop (the overlay's Esc cancel) to
+the client's current "turn", which never ends for a long-lived client. When a
+tool result reports that the app session was stopped by the user, the bridge
+recycles the client so the next request starts a fresh session instead of
+hitting the same stop again.
+
 ## Configuration
 
 Environment variables:
@@ -215,6 +221,19 @@ exists below `$CODEX_HOME/computer-use`.
 
 Quit and relaunch ChatGPT so its Computer Use client and runtime update
 together, then retry the smoke test.
+
+### `This application session has been explicitly stopped by the user`
+
+Someone pressed Esc on the Computer Use overlay, which cancels the app
+session for the current turn. The bridge recycles the client automatically,
+so simply ask Claude to continue when you are ready.
+
+### `errAETimeout: the AppleEvent timed out`
+
+The Computer Use service could not reach the target application in time. The
+call can block for a few minutes. Retry once; if it persists, quit and
+relaunch the target application, and as a last resort quit and relaunch
+ChatGPT so its Computer Use service restarts.
 
 ### Plugin changes do not appear
 

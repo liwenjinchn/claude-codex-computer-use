@@ -79,6 +79,22 @@ function handle(message) {
   }
 
   if (message.method === "tools/call") {
+    if (message.params?.arguments?.app === "Stopped App") {
+      write({
+        jsonrpc: "2.0",
+        id: message.id,
+        result: {
+          content: [
+            {
+              type: "text",
+              text: "This application session has been explicitly stopped by the user for this turn. Stop your work and send a final message noting they stopped the session and you're ready to continue if they want you to. Computer Use can be used again in the next assistant turn.",
+            },
+          ],
+        },
+      });
+      return;
+    }
+
     pendingToolCallId = message.id;
     const request = JSON.stringify({
       jsonrpc: "2.0",

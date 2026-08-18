@@ -257,3 +257,92 @@ test("releases the client when idle and relaunches it on demand", async () => {
     signal: null,
   });
 });
+
+test("recycles the client after a user-stopped app session", async () => {
+  const child = spawn(process.execPath, [bridgePath], {
+    env: {
+      ...process.env,
+      COMPUTER_USE_CLIENT_PATH: fakeUpstreamPath,
+      COMPUTER_USE_BRIDGE_DIRECT_LAUNCH: "1",
+      COMPUTER_USE_BRIDGE_IDLE_TIMEOUT_MS: "0",
+      COMPUTER_USE_BRIDGE_DEBUG: "1",
+    },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+
+  const waitFor = createMessageReader(child.stdout);
+
+  write(child, {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion: "2025-11-25",
+      capabilities: {},
+      clientInfo: {
+        name: "bridge-test",
+        version: "1.0.0",
+      },
+    },
+  });
+  await waitFor((message) => message.id === 1);
+  write(child, {
+    jsonrpc: "2.0",
+    method: "notifications/initialized",
+  });
+
+  write(child, {
+    jsonrpc: "2.0",
+    id: 2,
+    method: "tools/call",
+    params: {
+      name: "get_app_state",
+      arguments: {
+        app: "Stopped App",
+      },
+    },
+  });
+
+  const stopped = await waitFor((message) => message.id === 2);
+  assert.match(
+    stopped.result?.content?.[0]?.text ?? "",
+    /explicitly stopped by the user/,
+  );
+
+  await new Promise((resolve) => {
+    setTimeout(resolve, 300);
+  });
+  assert.match(stderr, /app session stopped by the user; releasing/);
+
+  write(child, {
+    jsonrpc: "2.0",
+    id: 3,
+    method: "tools/call",
+    params: {
+      name: "get_app_state",
+      arguments: {
+        app: "Fake App",
+      },
+    },
+  });
+
+  const recovered = await waitFor((message) => message.id === 3);
+  assert.equal(recovered.result?.content?.[0]?.text, "auto-approved");
+  assert.match(stderr, /relaunched the Computer Use client/);
+
+  child.stdin.end();
+  const exit = await new Promise((resolve) => {
+    child.on("close", (code, signal) => resolve({ code, signal }));
+  });
+
+  assert.deepEqual(exit, {
+    code: 0,
+    signal: null,
+  });
+});

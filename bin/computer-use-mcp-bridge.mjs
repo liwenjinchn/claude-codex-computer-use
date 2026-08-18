@@ -10,6 +10,7 @@ import { pathToFileURL } from "node:url";
 const DEBUG = process.env.COMPUTER_USE_BRIDGE_DEBUG === "1";
 const SYNTHETIC_INIT_ID = "computer-use-bridge/reinitialize";
 const DEFAULT_IDLE_TIMEOUT_MS = 60000;
+const SESSION_STOPPED_MARKER = "explicitly stopped by the user for this turn";
 
 function debug(message) {
   if (DEBUG) {
@@ -275,12 +276,23 @@ function forwardToUpstream(line, message) {
   touch();
 }
 
+function killTree(child, signal) {
+  // The launcher runs the Computer Use client as a grandchild. Signal the
+  // launcher's process group so a wedged client cannot outlive a release.
+  try {
+    process.kill(-child.pid, signal);
+  } catch {
+    child.kill(signal);
+  }
+}
+
 function spawnUpstream() {
   debug(`starting ${launchCommand} ${launchArgs.join(" ")}`);
 
   const child = spawn(launchCommand, launchArgs, {
     env: process.env,
     stdio: ["pipe", "pipe", "pipe"],
+    detached: true,
   });
   upstream = child;
 
@@ -361,17 +373,41 @@ function relaunchUpstream() {
   debug("relaunching the Computer Use client");
 }
 
-function releaseUpstream() {
+function releaseUpstream(reason) {
   const child = upstream;
   upstream = null;
   state = "down";
-  debug("idle timeout reached; releasing the Computer Use client");
-  child.kill("SIGTERM");
+  debug(`${reason}; releasing the Computer Use client`);
+  failPendingWork(
+    "The Computer Use client was recycled while the request was in flight. Retry the request.",
+  );
+  killTree(child, "SIGTERM");
   setTimeout(() => {
     if (child.exitCode === null && child.signalCode === null) {
-      child.kill("SIGKILL");
+      killTree(child, "SIGKILL");
     }
   }, 3000).unref();
+}
+
+function isSessionStoppedResult(message) {
+  if (
+    !isObject(message) ||
+    !Object.hasOwn(message, "id") ||
+    Object.hasOwn(message, "method")
+  ) {
+    return false;
+  }
+  const content = message.result?.content;
+  if (!Array.isArray(content)) {
+    return false;
+  }
+  return content.some(
+    (block) =>
+      isObject(block) &&
+      block.type === "text" &&
+      typeof block.text === "string" &&
+      block.text.includes(SESSION_STOPPED_MARKER),
+  );
 }
 
 function onUpstreamLine(child, line) {
@@ -389,7 +425,7 @@ function onUpstreamLine(child, line) {
       failPendingWork(
         "The Computer Use client could not be reinitialized. Retry the request.",
       );
-      releaseUpstream();
+      releaseUpstream("relaunch failed");
       return;
     }
     if (clientInitialized) {
@@ -445,13 +481,20 @@ function onUpstreamLine(child, line) {
   if (!process.stdout.destroyed && process.stdout.writable) {
     process.stdout.write(`${line}\n`);
   }
+
+  // The service latches a user-initiated stop for the rest of the client's
+  // "turn", but a long-lived bridge client never starts a new turn. Recycle
+  // the client so the next request begins a fresh turn.
+  if (isSessionStoppedResult(message)) {
+    releaseUpstream("app session stopped by the user");
+  }
 }
 
 process.stdout.on("error", (error) => {
   if (error.code === "EPIPE") {
     stopping = true;
     if (upstream) {
-      upstream.kill("SIGTERM");
+      killTree(upstream, "SIGTERM");
     } else {
       process.exit(1);
     }
@@ -550,7 +593,7 @@ if (idleTimeoutMs > 0) {
     if (Date.now() - lastActivity < idleTimeoutMs) {
       return;
     }
-    releaseUpstream();
+    releaseUpstream("idle timeout reached");
   }, checkInterval).unref();
 }
 
@@ -562,7 +605,7 @@ for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
     stopping = true;
     debug(`forwarding ${signal}`);
     if (upstream) {
-      upstream.kill(signal);
+      killTree(upstream, signal);
     } else {
       process.exitCode = signal === "SIGINT" ? 130 : 1;
       process.exit();
