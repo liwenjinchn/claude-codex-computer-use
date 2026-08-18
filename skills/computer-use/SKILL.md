@@ -36,9 +36,8 @@ full state only when the earlier tree is unavailable or a diff is insufficient.
 - `click`: click by `element_index`, or by coordinates as a fallback.
 - `set_value`: replace the value of an editable accessibility element.
 - `type_text`: type into the target app.
-- `press_key`: send a key or key combination such as `Return`, `Tab`, or
-  `super+c`. Never send `Escape`: the Computer Use overlay treats Esc as its
-  global cancel hotkey, and the service stops the app session for the turn.
+- `press_key`: send a key or key combination such as `Return`, `Tab`,
+  `super+c`, or `Escape`.
 - `scroll`: scroll an element or view.
 - `drag`: drag between coordinates.
 - `select_text`: select matching text or place the cursor around it.
@@ -62,10 +61,7 @@ If an action behaves unexpectedly, immediately fetch a fresh app state. If the
 accessibility tree is sparse, inspect the screenshot and use coordinates. Keep
 the loop observable: state, action, state.
 
-To dismiss or clear UI, use the app's own accessibility elements (for example
-a Clear/AC button) instead of the Escape key.
-
 If a tool result says the application session was explicitly stopped by the
-user, the user pressed the overlay's cancel control. Stop the Computer Use
+user, the user pressed Esc on the Computer Use overlay. Stop the Computer Use
 loop, tell the user, and continue only when they ask. The bridge recycles the
 client automatically, so the next attempt starts a fresh session.

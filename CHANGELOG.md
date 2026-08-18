@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2 - 2026-08-18
+
+- Restore `Escape` as a valid `press_key` example. Testing against the real
+  service shows the overlay's Esc cancel only applies to the physical key;
+  a synthetic Escape sent through `press_key` is delivered to the app
+  normally and does not stop the session.
+
 ## 0.1.1 - 2026-08-18
 
 - Recycle the Computer Use client when the service reports that the user
