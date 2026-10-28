@@ -26,7 +26,10 @@
     "skills",
     "README.md",
     "LICENSE",
-    "NOTICE"
+    "NOTICE",
+    "scripts/install.mjs",
+    "scripts/real-smoke-test.mjs",
+    "docs"
   ],
   "type": "module",
   "bin": {
@@ -39,13 +42,15 @@
     "access": "public"
   },
   "scripts": {
-    "test": "node --test test/bridge.test.mjs",
+    "test": "node --test test/*.test.mjs",
     "smoke": "node scripts/real-smoke-test.mjs",
     "prepack": "pnpm test",
-    "release": "bumpp package.json .claude-plugin/plugin.json"
+    "release": "bumpp package.json .claude-plugin/plugin.json",
+    "install:local": "node scripts/install.mjs"
   },
   "devDependencies": {
     "bumpp": "^11.1.0"
   },
-  "packageManager": "pnpm@11.1.1"
+  "packageManager": "pnpm@11.1.1",
+  "private": true
 }

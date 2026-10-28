@@ -1,278 +1,73 @@
-# Claude Codex Computer Use
+# Claude Code → Codex Computer Use（Mac 迁移版）
 
-An experimental, unofficial bridge that lets
-[Claude Code](https://code.claude.com) control local macOS applications
-through an existing OpenAI Computer Use installation.
+让 Claude Code 通过 MCP 使用本机已安装的 Codex / ChatGPT Computer Use。基于 [songkeys/claude-codex-computer-use](https://github.com/songkeys/claude-codex-computer-use) 0.1.2（MIT），保留原作者与许可证。
 
-The package contains no OpenAI binaries. It starts the Computer Use client
-already installed on the user's Mac and translates the small MCP compatibility
-gap between Claude Code and that client.
+此 fork 增加新版 Codex 可执行文件路径识别、短名称 `codex-cua` 安装器和中文迁移说明。桥接不调用 OpenAI 模型，但截图与界面文字会返回 Claude Code 当前配置的模型服务。
 
-## Requirements
+## 另一台 Mac 安装
 
-- macOS. The installed OpenAI runtime currently declares macOS 14.4 or later.
-- Claude Code with plugin support. Version 2.1.223 is verified.
-- ChatGPT or Codex with OpenAI Computer Use installed and working.
-- Accessibility and Screen Recording permissions granted to the OpenAI
-  Computer Use runtime.
+前提：macOS 14.4+、Node.js 22.14+、Git、Claude Code，以及已登录且 Computer Use 可用的 Codex / ChatGPT 桌面应用。先在桌面应用中安装 Computer Use，并按提示授予辅助功能、屏幕录制权限；这个仓库不包含 OpenAI 软件或账号凭据。Windows / Linux 不适用。
 
-The bridge looks for the Computer Use client at:
-
-```text
-$CODEX_HOME/computer-use/Codex Computer Use.app/Contents/SharedSupport/
-SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient
-```
-
-When `CODEX_HOME` is unset, it defaults to `~/.codex`.
-
-## Install as a Claude Code plugin
-
-In a Claude Code session:
-
-```text
-/plugin marketplace add songkeys/claude-codex-computer-use
-/plugin install claude-codex-computer-use@songkeys
-```
-
-Or from the shell:
+在终端执行：
 
 ```sh
-claude plugin marketplace add songkeys/claude-codex-computer-use
-claude plugin install claude-codex-computer-use@songkeys
+git clone https://github.com/liwenjinchn/claude-codex-computer-use.git
+cd claude-codex-computer-use
+node scripts/install.mjs --dry-run
+node scripts/install.mjs
 ```
 
-New sessions load the Computer Use Skill and MCP server automatically.
+安装器注册用户级 MCP `codex-cua`，安装 `/codex-computer-use` Skill；不需要 `npm install`，不改模型、密钥、代理配置。重复安装会保留已有同路径 MCP；若发现不同路径 MCP 或不同内容 Skill，会退出并提示处理。**安装后保留此文件夹和路径**，MCP 直接运行其中的脚本。
 
-Inspect the installation with:
+重开 Claude Code，运行 `/mcp`，确认 `codex-cua` 已连接，然后输入：
 
-```text
-/plugin
-/mcp
-```
+> 使用 codex-computer-use 操作计算器，输入 83×47=，读取实际界面与截图核对结果。
 
-## Install the MCP bridge from npm
+如以前安装过原版插件，先执行 `claude plugin disable --scope user claude-codex-computer-use@songkeys`，避免重复工具。推荐本安装器的短 MCP 名称；本机曾观察到原插件长工具名报 `No such tool available`，尚未确定问题属于客户端还是模型代理。
 
-The plugin installation is recommended because it includes both the MCP bridge
-and the Computer Use Skill. The npm package can also be used as a standalone
-stdio MCP server:
+## 自检与已验证范围
 
 ```sh
-claude mcp add computer-use -- npx -y claude-codex-computer-use@latest
+node --test test/bridge.test.mjs
+node scripts/real-smoke-test.mjs
+claude mcp get codex-cua
 ```
 
-Or as a direct `.mcp.json` entry:
-
-```json
-{
-  "mcpServers": {
-    "computer-use": {
-      "command": "npx",
-      "args": ["-y", "claude-codex-computer-use@latest"]
-    }
-  }
-}
-```
-
-This MCP-only installation does not load the bundled Skill. Prefer the plugin
-unless the MCP client supplies its own Computer Use instructions.
-
-## Usage
-
-Ask Claude to use Computer Use explicitly, or describe a desktop task:
-
-```text
-Use Computer Use to inspect Calculator and enter 42.
-```
-
-```text
-Open System Settings with Computer Use and tell me what page is visible.
-```
-
-The bundled Skill instructs Claude to use an observable state/action/state
-loop:
-
-1. Read the target app with `get_app_state`.
-2. Use accessibility elements when available and screenshot coordinates only
-   as a fallback.
-3. Perform the action.
-4. Fetch a fresh app state before deciding the next action.
-
-## How it works
-
-The OpenAI Computer Use service authenticates the client process ancestry.
-Launching its MCP client directly from Claude Code is rejected as an
-unauthenticated sender. The bridge therefore uses the signed Codex executable
-bundled with ChatGPT or Codex as a process launcher:
-
-```text
-Claude Code
-  -> claude-codex-computer-use bridge
-  -> signed Codex launcher
-  -> OpenAI Computer Use MCP client
-  -> OpenAI Computer Use service
-```
-
-Codex is not used as an agent and no OpenAI model request is made by the
-bridge. It runs `codex sandbox` with Codex's disabled/unrestricted permission
-profile so the signed client can access its normal caches, macOS services, and
-Unix sockets.
-
-The Computer Use client requires its MCP client to advertise the elicitation
-capability and answers app-access approvals through it. The bridge guarantees
-that capability is present on `initialize` and automatically accepts the
-app-access elicitation, so sessions work unattended. All other JSON-RPC
-messages, including screenshot image blocks, pass through unchanged.
-
-The Computer Use service treats a connected client as an active hold on the
-controlled applications and releases them when the client exits. Codex ends
-its client at the end of a conversation, but Claude Code keeps plugin MCP
-servers alive for the whole session. The bridge therefore terminates the
-client after 60 seconds without traffic and relaunches it on demand,
-transparently replaying the recorded `initialize` handshake, so apps are not
-held between tasks.
-
-The service also scopes a user-initiated stop (the overlay's Esc cancel) to
-the client's current "turn", which never ends for a long-lived client. When a
-tool result reports that the app session was stopped by the user, the bridge
-recycles the client so the next request starts a fresh session instead of
-hitting the same stop again.
-
-## Configuration
-
-Environment variables:
-
-| Variable | Purpose |
-| --- | --- |
-| `CODEX_HOME` | Override the Codex data directory. Defaults to `~/.codex`. |
-| `COMPUTER_USE_CLIENT_PATH` | Override the full path to `SkyComputerUseClient`. |
-| `COMPUTER_USE_CODEX_LAUNCHER_PATH` | Override the signed Codex executable path. |
-| `COMPUTER_USE_BRIDGE_IDLE_TIMEOUT_MS` | Idle time before the client is released. Defaults to `60000`; `0` keeps the client running for the whole session. |
-| `COMPUTER_USE_BRIDGE_DEBUG=1` | Write bridge diagnostics to stderr. |
-
-The signed launcher is discovered in this order:
-
-1. `COMPUTER_USE_CODEX_LAUNCHER_PATH`
-2. `/Applications/ChatGPT.app/Contents/Resources/codex`
-3. `/Applications/Codex.app/Contents/Resources/codex`
-
-## Security and data flow
-
-Installing this package gives Claude access to the local Computer Use tools,
-which can read screenshots, click, type, scroll, drag, and interact with
-applications.
-
-The bridge intentionally:
-
-- automatically accepts the Computer Use MCP app-access elicitation;
-- launches the signed client with an unrestricted Codex permission profile;
-- passes accessibility text and screenshots back to Claude as MCP tool
-  results;
-- releases the client after an idle timeout so applications are not held
-  between tasks, and relaunches it on demand.
-
-Claude Code may send those tool results to the configured model provider as
-part of the conversation. Do not install the plugin unless that behavior is
-acceptable for the applications and data on the Mac.
-
-## Compatibility
-
-The initial release was verified with:
-
-| Component | Verified version |
-| --- | --- |
-| Claude Code | 2.1.223 |
-| ChatGPT bundled Codex | 0.148.0-alpha.15 |
-| OpenAI Computer Use runtime | 26.817.1000761 |
-| macOS / architecture | macOS 27.0 / arm64 |
-| MCP protocol | 2025-11-25 |
-
-OpenAI Computer Use is an internal desktop integration rather than a stable
-third-party SDK. ChatGPT, Codex, or Computer Use updates may change binary
-paths, process-authentication rules, or protocol behavior.
-
-## Development
-
-The bridge has no runtime npm dependencies.
+冒烟测试会读取应用列表并打开计算器，检查界面文字和 JPEG 截图。模型端到端测试可使用：
 
 ```sh
-pnpm install
-pnpm test
-pnpm smoke
+claude -p '使用 codex-computer-use 操作计算器，通过 UI 输入 83*47=，读取真实结果，禁止用脚本或心算代替。' --allowedTools 'mcp__codex-cua__*'
 ```
 
-`pnpm test` uses a fake Computer Use server and is safe to run anywhere.
-`pnpm smoke` connects to the real local service, calls `list_apps`, and
-verifies that `get_app_state` returns both text and a JPEG screenshot.
+本机验证：Claude Code 2.1.309、Node 22.23.4、Computer Use 1001641；Claude 实际执行 1 次 `get_app_state` 与 15 次 `click`，返回 16 张截图，UI 观察到 `83×47=3,901` 和 `3910−9=3,901`。退出后未发现 bridge / `SkyComputerUseClient mcp` 控制进程残留。这是单台 Mac 的桌面验收，另一台机器仍需自检；未验证内置浏览器，也未测试全部工具。
 
-## Troubleshooting
+## 认证故障
 
-### `Sender process is not authenticated`
+若 MCP 已连接但模型返回 `401`，先检查 Claude Code 自身认证。若已配置 `apiKeyHelper`，而终端继承了旧认证变量，可仅对一次测试移除旧变量：
 
-The Computer Use client was started directly instead of through the signed
-Codex launcher. Ensure ChatGPT or Codex is installed in `/Applications`, or set
-`COMPUTER_USE_CODEX_LAUNCHER_PATH`.
+```sh
+env -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY claude
+```
 
-### Computer Use client is missing
+仅适用于确认应使用 `apiKeyHelper` 的情况；不要把其他机器的密钥或配置备份上传 GitHub。
 
-Enable or reinstall OpenAI Computer Use first, then verify that its client
-exists below `$CODEX_HOME/computer-use`.
+## 权限与生命周期
 
-### Client and server version mismatch
+桥接自动接受 Computer Use 的应用访问请求，并通过签名的 Codex 启动器运行已有客户端。应用内容和截图会发送到当前模型服务。使用时明确限定目标应用和任务。默认空闲 60 秒释放客户端，下次调用自动重连；退出 Claude Code 时释放控制进程。应用菜单可能保留会话记录，详见[上游说明](docs/UPSTREAM-README.md)。
 
-Quit and relaunch ChatGPT so its Computer Use client and runtime update
-together, then retry the smoke test.
+这是依赖内部接口的非官方集成；Codex / ChatGPT 更新后可能需要适配。本仓库不包含本机截图、认证信息、配置备份或 OpenAI 二进制文件。
 
-### `This application session has been explicitly stopped by the user`
+## 更新与卸载
 
-Someone pressed Esc on the Computer Use overlay, which cancels the app
-session for the current turn. The bridge recycles the client automatically,
-so simply ask Claude to continue when you are ready.
+```sh
+# 更新（通常不需要重新注册 MCP）
+git pull --ff-only
+node scripts/install.mjs --dry-run
 
-### ChatGPT still lists the app under Computer Use
+# 卸载 MCP
+claude mcp remove codex-cua --scope user
+```
 
-ChatGPT's Computer Use menu can keep showing an app (with a "Stop Using …"
-action) after the bridge has released the client. The service keeps its app
-session record so that a follow-up turn can resume without a new approval,
-and only Codex's own turn-tracking closes it. External clients have no
-supported way to send that signal. The record is bookkeeping: the controlling
-client process is gone and new bridge sessions are unaffected. Clear it with
-the "Stop Using …" action in ChatGPT, or by quitting ChatGPT.
+卸载 Skill：删除 `~/.claude/skills/codex-computer-use`（如自行修改过，先备份）。已有 Skill 内容变化时，更新安装器会拒绝覆盖；核对并备份后再替换。重开 Claude Code 生效。
 
-### `SkyComputerUseClient computer-history` processes linger
-
-These are ChatGPT's own history/recording helpers, spawned by its
-`codex app-server` daemon whenever Computer Use is used and kept around
-afterwards. They are idle, they do not hold control of any application, and
-they are not managed by this bridge. The client the bridge manages runs with
-a plain `mcp` argument and exits on idle release. The helpers exit when
-ChatGPT quits.
-
-### `errAETimeout: the AppleEvent timed out`
-
-The Computer Use service could not reach the target application in time. The
-call can block for a few minutes. Retry once; if it persists, quit and
-relaunch the target application, and as a last resort quit and relaunch
-ChatGPT so its Computer Use service restarts.
-
-### Plugin changes do not appear
-
-Restart Claude Code or run `/plugin marketplace update songkeys` and
-reinstall. Claude Code runs a cached copy of the installed plugin, so editing
-a checkout does not affect an existing installation until the plugin is
-updated.
-
-## License and trademarks
-
-The bridge code is available under the [MIT License](./LICENSE).
-
-This project is independent and is not affiliated with, endorsed by, or
-sponsored by OpenAI or Anthropic. OpenAI, ChatGPT, Codex, Anthropic, Claude,
-and related names may be trademarks of their respective owners. Users must
-supply and be licensed to use their own OpenAI and Anthropic software and
-accounts.
-
-## Prior art
-
-This project mirrors
-[kimi-computer-use](https://github.com/songkeys/kimi-computer-use), the same
-bridge for Kimi Code CLI.
+[上游原始文档](docs/UPSTREAM-README.md) · [MIT License](LICENSE) · [Security](SECURITY.md)

@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Please report vulnerabilities through GitHub's private vulnerability reporting
-for `songkeys/claude-codex-computer-use`. Do not include private screenshots,
+if available for this fork. Otherwise report upstream bridge issues privately to the upstream maintainer. Do not include private screenshots,
 credentials, or application data in a public issue.
 
 ## Security model

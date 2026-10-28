@@ -48,6 +48,8 @@ async function resolveTrustedLauncherPath() {
   const override = process.env.COMPUTER_USE_CODEX_LAUNCHER_PATH?.trim();
   const candidates = [
     override,
+    "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+    "/Applications/Codex.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
     "/Applications/ChatGPT.app/Contents/Resources/codex",
     "/Applications/Codex.app/Contents/Resources/codex",
   ].filter(Boolean);

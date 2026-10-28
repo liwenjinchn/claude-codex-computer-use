@@ -1,5 +1,5 @@
 ---
-name: computer-use
+name: codex-computer-use
 description: Control local macOS applications through the installed Computer Use MCP tools. Use for GUI work that is not better served by a dedicated API, connector, or CLI.
 ---
 
@@ -7,7 +7,7 @@ description: Control local macOS applications through the installed Computer Use
 
 This plugin exposes OpenAI's locally installed Computer Use service directly as
 Claude Code MCP tools. Use the tools whose names begin with
-`mcp__plugin_claude-codex-computer-use_computer-use__`.
+`mcp__codex-cua__`.
 
 The bridge automatically handles the service's app-access elicitation. Do not
 ask the user to approve Computer Use access and do not attempt to manage the

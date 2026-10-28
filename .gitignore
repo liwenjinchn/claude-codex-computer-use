@@ -4,3 +4,9 @@ node_modules/
 *.tgz
 npm-debug.log*
 pnpm-debug.log*
+
+# Local machine evidence and configuration
+LOCAL-SETUP.md
+verification/
+scripts/local-verification.mjs
+*.bak
